@@ -25,26 +25,25 @@
 #import "PromoCodesViewController.h"
 #import "PromoCodesLicenseViewController.h"
 
-#define kAddNewAccountEditorIdentifier	@"AddNewAccountEditorIdentifier"
-#define kEditAccountEditorIdentifier	@"EditAccountEditorIdentifier"
-#define kSettingsEditorIdentifier		@"SettingsEditorIdentifier"
-#define kUpdateExchangeRatesButton		@"UpdateExchangeRatesButton"
-#define kImportReportsButton			@"ImportReportsButton"
-#define kExportReportsButton			@"ExportReportsButton"
-#define	kDeleteAccountButton			@"DeleteAccount"
-#define kAlertTagConfirmImport			1
-#define kAlertTagConfirmExport			2
-#define kAlertTagConfirmDelete			3
-#define kAccountUsername				@"username"
-#define kAccountPassword				@"password"
-#define kAccountTitle					@"title"
-
-#define kKeychainServiceIdentifier		@"iTunesConnect"
+#define kAddNewAccountEditorIdentifier		@"AddNewAccountEditorIdentifier"
+#define kEditAccountEditorIdentifier		@"EditAccountEditorIdentifier"
+#define kSettingsEditorIdentifier			@"SettingsEditorIdentifier"
+#define kUpdateExchangeRatesButton			@"UpdateExchangeRatesButton"
+#define kImportReportsButton				@"ImportReportsButton"
+#define kExportReportsButton				@"ExportReportsButton"
+#define kDownloadBoxcarButton				@"DownloadBoxcarButton"
+#define kAddToBoxcarButton					@"AddToBoxcarButton"
+#define	kDeleteAccountButton				@"DeleteAccount"
+#define kAlertTagConfirmImport				1
+#define kAlertTagConfirmExport				2
+#define kAlertTagConfirmDelete				3
+#define kAccountTitle						@"title"
+#define kKeychainServiceIdentifier			@"iTunesConnect"
 
 
 @implementation AccountsViewController
 
-@synthesize managedObjectContext, accounts, selectedAccount, refreshButtonItem;
+@synthesize managedObjectContext, accounts, selectedAccount, refreshButtonItem, delegate;
 
 - (void)viewDidLoad
 {
@@ -67,8 +66,6 @@
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(contextDidChange:) name:NSManagedObjectContextObjectsDidChangeNotification object:[self managedObjectContext]];
 	
 	[[ReportDownloadCoordinator sharedReportDownloadCoordinator] addObserver:self forKeyPath:@"isBusy" options:NSKeyValueObservingOptionNew context:nil];
-	
-	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(promoCodeLicenseAgreementLoaded:) name:@"PromoCodeOperationLoadedLicenseAgreementNotification" object:nil];
 	
 	[self reloadAccounts];
 }
@@ -109,7 +106,17 @@
 - (void)downloadReports:(id)sender
 {
 	for (ASAccount *account in self.accounts) {
-		[[ReportDownloadCoordinator sharedReportDownloadCoordinator] downloadReportsForAccount:account];
+		if (account.password && account.password.length > 0) { //Only download reports for accounts with login
+			if (!account.vendorID || account.vendorID.length == 0) {
+				[[[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Vendor ID Missing", nil) 
+											 message:[NSString stringWithFormat:NSLocalizedString(@"You have not entered a vendor ID for the account \"%@\". Please go to the account's settings and fill in the missing information.", nil), [account displayName]] 
+											delegate:nil 
+								   cancelButtonTitle:NSLocalizedString(@"OK", nil) 
+								   otherButtonTitles:nil] autorelease] show];
+			} else {
+				[[ReportDownloadCoordinator sharedReportDownloadCoordinator] downloadReportsForAccount:account];
+			}
+		}
 	}
 }
 
@@ -117,17 +124,14 @@
 {
 	AboutViewController *aboutViewController = [[[AboutViewController alloc] initWithNibName:nil bundle:nil] autorelease];
 	UINavigationController *aboutNavController = [[[UINavigationController alloc] initWithRootViewController:aboutViewController] autorelease];
-	aboutNavController.modalTransitionStyle = UIModalTransitionStyleFlipHorizontal;
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) {
+		aboutNavController.modalPresentationStyle = UIModalPresentationFormSheet;
+	} else {
+		aboutNavController.modalTransitionStyle = UIModalTransitionStyleFlipHorizontal;
+	}
 	[self presentModalViewController:aboutNavController animated:YES];
 }
 
-- (void)promoCodeLicenseAgreementLoaded:(NSNotification *)notification
-{
-	NSString *licenseAgreement = [[notification userInfo] objectForKey:@"licenseAgreement"];
-	PromoCodesLicenseViewController *vc = [[[PromoCodesLicenseViewController alloc] initWithLicenseAgreement:licenseAgreement operation:[notification object]] autorelease];
-	UINavigationController *navController = [[[UINavigationController alloc] initWithRootViewController:vc] autorelease];
-	[self presentModalViewController:navController animated:YES];
-}
 
 - (void)viewDidUnload
 {
@@ -139,6 +143,8 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) return nil;
+	
 	if ([self.accounts count] == 0) {
 		return nil;
 	}
@@ -152,6 +158,8 @@
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) return 1;
+	
 	if ([self.accounts count] == 0) {
 		return 1;
 	}
@@ -160,6 +168,8 @@
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) return self.accounts.count;
+	
 	if ([self.accounts count] == 0) {
 		return 0;
 	}
@@ -172,8 +182,13 @@
 	BadgedCell *cell = (BadgedCell *)[tableView dequeueReusableCellWithIdentifier:cellIdentifier];
 	if (cell == nil) {
 		cell = [[[BadgedCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellIdentifier] autorelease];
-		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
 	}
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) {
+		cell.textLabel.text = [[self.accounts objectAtIndex:indexPath.row] displayName];
+		cell.accessoryType = UITableViewCellAccessoryDetailDisclosureButton;
+		return cell;
+	}
+	cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
 	if (indexPath.row == 0) {
 		NSInteger badge = [[[self.accounts objectAtIndex:indexPath.section] reportsBadge] integerValue];
 		cell.textLabel.text = NSLocalizedString(@"Sales and Trends", nil);
@@ -210,8 +225,17 @@
 	return cell;
 }
 
+- (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)indexPath
+{
+	//iPad only
+	ASAccount *account = [self.accounts objectAtIndex:indexPath.row];
+	[self editAccount:account];
+}
+
 - (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section
 {
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) return nil;
+	
 	if ([self.accounts count] == 0) {
 		return nil;
 	}
@@ -224,15 +248,6 @@
 	return 26.0;
 }
 
-/*
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
-{
-	if ([self.accounts count] == 0) {
-		return NSLocalizedString(@"Tap the \u271A button to add an account.", nil);
-	}
-	return nil;
-}
- */
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
@@ -241,6 +256,13 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) {
+		if (self.delegate) {
+			ASAccount *account = [self.accounts objectAtIndex:indexPath.row];
+			[self.delegate accountsViewController:self didSelectAccount:account];
+		}
+		return;
+	}
 	ASAccount *account = [self.accounts objectAtIndex:indexPath.section];
 	if (indexPath.row == 0) {
 		SalesViewController *salesViewController = [[[SalesViewController alloc] initWithAccount:account] autorelease];
@@ -279,7 +301,11 @@
 	
 	FieldSpecifier *usernameField = [FieldSpecifier emailFieldWithKey:kAccountUsername title:NSLocalizedString(@"Email", nil) defaultValue:@""];
 	FieldSpecifier *passwordField = [FieldSpecifier passwordFieldWithKey:kAccountPassword title:NSLocalizedString(@"Password", nil) defaultValue:@""];
-	FieldSectionSpecifier *loginSection = [FieldSectionSpecifier sectionWithFields:[NSArray arrayWithObjects:usernameField, passwordField, nil] 
+	FieldSpecifier *vendorIDField = [FieldSpecifier numericFieldWithKey:kAccountVendorID title:NSLocalizedString(@"Vendor ID", nil) defaultValue:@""];
+	vendorIDField.placeholder = @"8XXXXXXX";
+	FieldSpecifier *selectVendorIDButtonField = [FieldSpecifier buttonFieldWithKey:@"SelectVendorIDButton" title:NSLocalizedString(@"Auto-Fill Vendor ID...", nil)];
+	
+	FieldSectionSpecifier *loginSection = [FieldSectionSpecifier sectionWithFields:[NSArray arrayWithObjects:usernameField, passwordField, vendorIDField, selectVendorIDButtonField, nil] 
 																			 title:NSLocalizedString(@"iTunes Connect Login", nil) 
 																	   description:NSLocalizedString(@"You can import reports via iTunes File Sharing without entering your login.", nil)];
 	
@@ -291,6 +317,10 @@
 	addAccountViewController.editorIdentifier = kAddNewAccountEditorIdentifier;
 	UINavigationController *navigationController = [[[UINavigationController alloc] initWithRootViewController:addAccountViewController] autorelease];
 	
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) {
+		navigationController.modalPresentationStyle = UIModalPresentationFormSheet;
+		
+	}
 	[self presentModalViewController:navigationController animated:YES];
 }
 
@@ -300,13 +330,18 @@
 	NSString *username = account.username;
 	NSString *password = account.password;
 	NSString *title = account.title;
+	NSString *vendorID = account.vendorID;
 	
 	FieldSpecifier *titleField = [FieldSpecifier textFieldWithKey:kAccountTitle title:@"Description" defaultValue:title];
 	titleField.placeholder = NSLocalizedString(@"optional", nil);
 	
 	FieldSpecifier *usernameField = [FieldSpecifier emailFieldWithKey:kAccountUsername title:NSLocalizedString(@"Username", nil) defaultValue:username];
 	FieldSpecifier *passwordField = [FieldSpecifier passwordFieldWithKey:kAccountPassword title:NSLocalizedString(@"Password", nil) defaultValue:password];
-	FieldSectionSpecifier *loginSection = [FieldSectionSpecifier sectionWithFields:[NSArray arrayWithObjects:usernameField, passwordField, nil] 
+	FieldSpecifier *vendorIDField = [FieldSpecifier numericFieldWithKey:kAccountVendorID title:NSLocalizedString(@"Vendor ID", nil) defaultValue:vendorID];
+	FieldSpecifier *selectVendorIDButtonField = [FieldSpecifier buttonFieldWithKey:@"SelectVendorIDButton" title:NSLocalizedString(@"Auto-Fill Vendor ID...", nil)];
+	
+	vendorIDField.placeholder = @"8XXXXXXX";
+	FieldSectionSpecifier *loginSection = [FieldSectionSpecifier sectionWithFields:[NSArray arrayWithObjects:usernameField, passwordField, vendorIDField, selectVendorIDButtonField, nil] 
 																			 title:NSLocalizedString(@"iTunes Connect Login", nil) 
 																	   description:nil];
 	FieldSpecifier *loginSubsectionField = [FieldSpecifier subsectionFieldWithSection:loginSection key:@"iTunesConnect"];
@@ -347,13 +382,18 @@
 	editAccountViewController.delegate = self;
 	editAccountViewController.editorIdentifier = kEditAccountEditorIdentifier;
 	editAccountViewController.context = account;
-	editAccountViewController.hidesBottomBarWhenPushed = YES;
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPhone) {
+		editAccountViewController.hidesBottomBarWhenPushed = YES;
+	}
+	
+	editAccountViewController.contentSizeForViewInPopover = CGSizeMake(320, 480);
 	
 	[self.navigationController pushViewController:editAccountViewController animated:YES];
 }
 
 - (void)showSettings
 {
+	// main section
 	NSString *baseCurrency = [[CurrencyManager sharedManager] baseCurrency];
 	NSArray *availableCurrencies = [[CurrencyManager sharedManager] availableCurrencies];
 	NSMutableArray *currencyFields = [NSMutableArray array];
@@ -370,14 +410,46 @@
 	FieldSectionSpecifier *mainSection = [FieldSectionSpecifier sectionWithFields:[NSArray arrayWithObjects:currencySectionField, updateExchangeRatesButtonField, nil] 
 																			title:NSLocalizedString(@"General", nil) 
 																	  description:NSLocalizedString(@"Exchange rates will automatically be refreshed periodically.", nil)];
+
+
+  
+	// products section
+	NSString* productSortByValue = [[NSUserDefaults standardUserDefaults] objectForKey:@"ProductSortby"];
+	FieldSpecifier *productSortingByProductIdField = [FieldSpecifier checkFieldWithKey:@"sortby.productId" title:@"Product ID" 
+																			defaultValue:[productSortByValue isEqualToString:@"productId"]];
+	FieldSpecifier *productSortingByColorField = [FieldSpecifier checkFieldWithKey:@"sortby.color" title:@"Color" 
+																		defaultValue:[productSortByValue isEqualToString:@"color"]];
+	NSMutableArray *productSortingFields = [NSArray arrayWithObjects:productSortingByProductIdField, productSortingByColorField, nil];
+
+
+	FieldSectionSpecifier *productSortingSection = [FieldSectionSpecifier sectionWithFields:productSortingFields
+																				  title:NSLocalizedString(@"Sort By", nil)
+																			description:nil];
+	productSortingSection.exclusiveSelection = YES;
+	FieldSpecifier *productsSectionField = [FieldSpecifier subsectionFieldWithSection:productSortingSection key:@"sortby"];
+	FieldSectionSpecifier *productsSection = [FieldSectionSpecifier sectionWithFields:[NSArray arrayWithObjects:productsSectionField, nil] 
+																				  title:NSLocalizedString(@"Products", nil) 
+																			description:NSLocalizedString(@"", nil)];
 	
-	NSArray *sections = [NSArray arrayWithObjects:mainSection, nil];
+	// push section
+	FieldSpecifier *downloadBoxcarButtonField = [FieldSpecifier buttonFieldWithKey:kDownloadBoxcarButton title:NSLocalizedString(@"Install Boxcar...", nil)];
+	FieldSpecifier *addToBoxcarButtonField = [FieldSpecifier buttonFieldWithKey:kAddToBoxcarButton title:NSLocalizedString(@"Add AppSales to Boxcar...", nil)];
+	FieldSectionSpecifier *pushSection = [FieldSectionSpecifier sectionWithFields:[NSArray arrayWithObjects:downloadBoxcarButtonField, addToBoxcarButtonField, nil] 
+																			title:NSLocalizedString(@"Push Notifications", nil) 
+																	  description:NSLocalizedString(@"To receive push notifications when new sales reports are available you have to install the free Boxcar app.", nil)];
+	FieldSpecifier *pushSectionField = [FieldSpecifier subsectionFieldWithSection:pushSection key:@"PushSection"];
+	FieldSectionSpecifier *pushSectionFieldSection = [FieldSectionSpecifier sectionWithFields:[NSArray arrayWithObject:pushSectionField] title:NSLocalizedString(@"Push Notifications", nil) description:nil];
+		  
+	NSArray *sections = [NSArray arrayWithObjects:mainSection, productsSection, pushSectionFieldSection, nil];
 	FieldEditorViewController *settingsViewController = [[[FieldEditorViewController alloc] initWithFieldSections:sections title:NSLocalizedString(@"Settings",nil)] autorelease];
 	settingsViewController.doneButtonTitle = NSLocalizedString(@"Done", nil);
 	settingsViewController.delegate = self;
 	settingsViewController.editorIdentifier = kSettingsEditorIdentifier;
 	
 	UINavigationController *settingsNavController = [[[UINavigationController alloc] initWithRootViewController:settingsViewController] autorelease];
+	if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) {
+		settingsNavController.modalPresentationStyle = UIModalPresentationFormSheet;
+	}
 	[self presentModalViewController:settingsNavController animated:YES];
 }
 
@@ -386,26 +458,30 @@
 	if ([editor.editorIdentifier isEqualToString:kAddNewAccountEditorIdentifier] || [editor.editorIdentifier isEqualToString:kEditAccountEditorIdentifier]) {
 		NSString *username = [returnValues objectForKey:kAccountUsername];
 		NSString *password = [returnValues objectForKey:kAccountPassword];
+		NSString *vendorID = [returnValues objectForKey:kAccountVendorID];
 		NSString *title = [returnValues objectForKey:kAccountTitle];
 		if ((!username || [username isEqualToString:@""]) && (!title || [title isEqualToString:@""])) {
 			[[[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Missing Information", nil) message:NSLocalizedString(@"You need to enter at least a username or a description.\n\nIf you want to download reports from iTunes Connect, you need to enter your username and password, otherwise you can just enter a description.", nil) delegate:nil cancelButtonTitle:NSLocalizedString(@"OK", nil) otherButtonTitles:nil] autorelease] show];
 			return;
 		}
 		if ([editor.editorIdentifier isEqualToString:kAddNewAccountEditorIdentifier]) {
+			if (password && (!vendorID || vendorID.length == 0)) {
+				[[[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Missing Information", nil) message:NSLocalizedString(@"You need to enter a vendor ID. If you don't know your vendor ID, tap \"Auto-Fill Vendor ID\".", nil) delegate:nil cancelButtonTitle:NSLocalizedString(@"OK", nil) otherButtonTitles:nil] autorelease] show];
+				return;
+			}
 			ASAccount *account = (ASAccount *)[NSEntityDescription insertNewObjectForEntityForName:@"Account" inManagedObjectContext:self.managedObjectContext];
-			[account setValue:title forKey:kAccountTitle];
-			[account setValue:username forKey:kAccountUsername];
+			account.title = title;
+			account.username = username;
+			account.vendorID = vendorID;
 			account.sortIndex = [NSNumber numberWithLong:time(NULL)];
 			[account setPassword:password];
 		}
 		else if ([editor.editorIdentifier isEqualToString:kEditAccountEditorIdentifier]) {
 			ASAccount *account = (ASAccount *)editor.context;
 			[account deletePassword];
-			NSString *username = [returnValues objectForKey:kAccountUsername];
-			NSString *password = [returnValues objectForKey:kAccountPassword];
-			NSString *title = [returnValues objectForKey:kAccountTitle];
 			account.username = username;
 			account.title = title;
+			account.vendorID = vendorID;
 			[account setPassword:password];
 			
 			NSMutableDictionary *productsByID = [NSMutableDictionary dictionary];
@@ -439,8 +515,17 @@
 					[[CurrencyManager sharedManager] setBaseCurrency:[[key componentsSeparatedByString:@"."] lastObject]];
 				}
 			}
+      
+      if ([key hasPrefix:@"sortby."]) {
+				if ([[returnValues objectForKey:key] boolValue]) {
+          [[NSUserDefaults standardUserDefaults] setObject:[[key componentsSeparatedByString:@"."] lastObject] forKey:@"ProductSortby"];
+				}
+			}
+      
 		}
 		[self dismissModalViewControllerAnimated:YES];
+		
+		[[NSNotificationCenter defaultCenter] postNotificationName:ASViewSettingsDidChangeNotification object:nil];
 	}
 	[self reloadAccounts];
 }
@@ -488,6 +573,42 @@
 															otherButtonTitles:NSLocalizedString(@"Delete", nil), nil] autorelease];
 		confirmDeleteAlert.tag = kAlertTagConfirmDelete;
 		[confirmDeleteAlert show];
+	} else if ([key isEqualToString:@"SelectVendorIDButton"]) {
+		FieldEditorViewController *vc = nil;
+		if (self.modalViewController) {
+			UINavigationController *nav = (UINavigationController *)self.modalViewController;
+			vc = (FieldEditorViewController *)[[nav viewControllers] objectAtIndex:0];
+		} else {
+			vc = (FieldEditorViewController *)[self.navigationController.viewControllers lastObject];
+		}
+		NSString *username = [vc.values objectForKey:kAccountUsername];
+		NSString *password = [vc.values objectForKey:kAccountPassword];
+		[vc dismissKeyboard];
+		
+		if (!username || username.length == 0 || !password || password.length == 0) {
+			[[[[UIAlertView alloc] initWithTitle:nil message:NSLocalizedString(@"Please enter your username and password first.", nil) delegate:nil cancelButtonTitle:NSLocalizedString(@"OK", nil) otherButtonTitles:nil] autorelease] show];
+			return;
+		}
+		
+		NSDictionary *loginInfo = [NSDictionary dictionaryWithObjectsAndKeys:password, kAccountPassword, username, kAccountUsername, nil];
+		
+		MBProgressHUD *hud = [MBProgressHUD showHUDAddedTo:vc.navigationController.view animated:YES];
+		hud.labelText = NSLocalizedString(@"Checking Vendor ID...", nil);
+		[hud showWhileExecuting:@selector(findVendorIDsWithLogin:) onTarget:self withObject:loginInfo animated:YES];
+	} else if ([key isEqualToString:kDownloadBoxcarButton]) {
+		if ([[UIApplication sharedApplication] canOpenURL:[NSURL URLWithString:@"boxcar://provider/965"]]) {
+			[[[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Boxcar Already Installed", nil) 
+										 message:NSLocalizedString(@"The Boxcar app is already installed on your device. Please tap \"Add AppSales to Boxcar\" to start receiving push notifications.", nil) delegate:nil cancelButtonTitle:NSLocalizedString(@"OK", nil) otherButtonTitles:nil] autorelease] show];
+		} else {
+			[[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"http://itunes.apple.com/app/boxcar/id321493542"]];
+		}
+	} else if ([key isEqualToString:kAddToBoxcarButton]) {
+		if ([[UIApplication sharedApplication] canOpenURL:[NSURL URLWithString:@"boxcar://provider/965"]]) {
+			[[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"boxcar://provider/965"]];
+		} else {
+			[[[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Boxcar Not Installed", nil) 
+										 message:NSLocalizedString(@"The Boxcar app is not installed on your device. Please download it from the App Store and try again.", nil) delegate:nil cancelButtonTitle:NSLocalizedString(@"OK", nil) otherButtonTitles:nil] autorelease] show];
+		}
 	}
 }
 
